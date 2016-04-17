@@ -47,7 +47,8 @@ h1.title {
     top: -50px;
     opacity: 0; } }
 .scores-container {
-  float: right;
+  #float: right;
+  margin-bottom: 10px;
   text-align: right; }
 
 .score-container, .best-container {
@@ -533,6 +534,9 @@ hr {
 .game-explanation {
   margin-top: 50px; }
 
+.logo-container {
+  float: right; }
+
 @media screen and (max-width: 520px) {
   html, body {
     font-size: 15px; }
@@ -558,8 +562,8 @@ hr {
     margin-bottom: 10px; }
 
   .game-intro {
-    width: 55%;
-    display: block;
+    max-width: 55%;
+    max-display: block;
     box-sizing: border-box;
     line-height: 1.65; }
 
