@@ -1,3 +1,255 @@
+var Player = {
+  HUMAN: "human",
+  COMPUTER: "computer",
+};
+
+function AIState(grid)
+{
+  if (!grid)
+    return;
+  this.size = grid.size;
+  this.player = Player.HUMAN;
+  this.lastMove = null;
+  this.cells = this.empty();
+
+  for (var x = 0; x < this.size; x++) {
+    for (var y = 0; y < this.size; y++) {
+      if (grid.cells[x][y])
+        this.cells[x][y] = grid.cells[x][y].value;
+    }
+  }
+}
+
+AIState.prototype.empty = function () {
+  var cells = [];
+
+  for (var x = 0; x < this.size; x++) {
+    var row = cells[x] = [];
+
+    for (var y = 0; y < this.size; y++) {
+      row.push(0);
+    }
+  }
+
+  return cells;
+};
+
+AIState.prototype.copy = function () {
+  var cells = [];
+
+  for (var x = 0; x < this.size; x++) {
+    var row = cells[x] = [];
+
+    for (var y = 0; y < this.size; y++) {
+      row.push(this.cells[x][y]);
+    }
+  }
+
+  return cells;
+};
+
+AIState.prototype.move = function (direction) {
+  var child = new AIState();
+  child.size = this.size;
+  child.cells = this.empty();
+  child.player = Player.COMPUTER;
+  child.last = direction;
+
+  var get = [
+    function (x, y) { return { x: x, y: y }; }, // u
+    function (x, y) { return { x: child.size - y - 1, y: x }; }, // r
+    function (x, y) { return { x: x, y: child.size - y - 1 }; }, // d
+    function (x, y) { return { x: y, y: x }; }, // l
+  ][direction];
+
+  var moved = false;
+
+  /*
+   * WLOG we pretent that all moves are to the left...
+   */
+  for (var x = 0; x < child.size; x++) {
+    var lasty = 0;
+    var merged = true;
+    for (var y = 0; y < child.size; y++) {
+      var pos = get(x, y);
+
+      var lpos = get(x, lasty);
+      var cell = this.cells[pos.x][pos.y];
+
+      if (cell == 0)
+        continue;
+
+      if (!merged) {
+        if (child.cells[lpos.x][lpos.y] == cell) {
+          child.cells[lpos.x][lpos.y] *= 2;
+          merged = true;
+          moved = true;
+          lasty++;
+          continue;
+        }
+        lasty++;
+        lpos = get(x, lasty);
+      }
+
+      if (y != lasty)
+        moved = true;
+
+      child.cells[lpos.x][lpos.y] = cell;
+      merged = false;
+    }
+  }
+
+  return moved ? child : null;
+};
+
+AIState.prototype.childStates = function () {
+  var states = [];
+  var child;
+
+  if (this.player == Player.COMPUTER) {
+    for (var x = 0; x < this.size; x++) {
+      for (var y = 0; y < this.size; y++) {
+        if (!this.cells[x][y]) {
+          for (var i = 0; i < 2; i++) {
+            child = new AIState();
+            child.size = this.size;
+            child.player = Player.HUMAN;
+            child.cells = this.copy();
+            child.cells[x][y] = 2 << i;
+            states.push(child);
+          }
+        }
+      }
+    }
+  } else {
+    for (var dir = 0; dir < 4; dir++) {
+      child = this.move(dir);
+      if (child) {
+        states.push(child);
+      }
+    }
+  }
+
+  return states;
+};
+
+AIState.prototype.maxCorner = function () {
+  var c = this.cells;
+  return [[0, 0],
+      [this.size - 1, 0],
+      [0, this.size - 1],
+      [this.size - 1, this.size - 1]].reduce(function (a, b) {
+    return c[a[0]][a[1]] > c[b[0]][b[1]] ? a : b;
+  });
+};
+
+AIState.prototype.staticEval = function () {
+  var value = 0.0;
+
+  var corner = this.maxCorner();
+  var x = corner[0];
+  var y = corner[1];
+  var cv = this.cells[x][y];
+
+  var xd = x == 0 ? 1 : -1;
+  var yd = y == 0 ? 1 : -1;
+
+  var yy, xx;
+
+  if (this.cells[x + xd][y] > this.cells[x][y + yd]) {
+    xx = xd;
+    yy = 0;
+  } else  {
+    xx = 0;
+    yy = yd;
+  }
+
+  value += 15.0 * cv;
+
+  var chain = true;
+
+  var last = cv;
+  var lastlast = 0;
+
+  for (var i = 0; i < this.size * this.size - 1; i++) {
+    x += xx;
+    y += yy;
+
+    var turn = false;
+    if (x < 0 || x >= this.size) {
+      xx = -xx;
+      x += xx;
+      y += yd;
+      turn = true;
+    }
+    if (y < 0 || y >= this.size) {
+      yy = -yy;
+      y += yy;
+      x += xd;
+      turn = true;
+    }
+
+    if (chain) {
+      value += last + 1.0;
+    } else {
+      if (last == 0)
+        value += 12.0 + (cv > 512 ? 2 : 0);
+    }
+
+    var val = this.cells[x][y];
+    if (val > last && last != 0) {
+      value -= val - last;
+      chain = false;
+    }
+
+    lastlast = last;
+    last = val;
+  }
+
+  return value;
+};
+
+AIState.prototype.eval = function (depth) {
+  if (depth == 0)
+    return this.staticEval();
+
+  var cells = this.cells;
+  var f = this.player == Player.COMPUTER ? Math.min : Math.max;
+
+  var children = this.childStates();
+
+  if (children.length == 0)
+    return -100000;
+
+  return children.map(function (x) {
+    var e = x.eval(depth - 1) * 0.99;
+    return e;
+  }).reduce(function (x, y) {
+    return f(x, y);
+  });
+};
+
+AIState.prototype.log = function () {
+  var out = "";
+
+  for (var x = 0; x < this.size; x++) {
+    var row = this.cells[x];
+
+    for (var y = 0; y < this.size; y++) {
+      var tile = this.cells[y][x];
+      if (tile == 0) {
+        out += "_ ";
+      } else {
+        out += tile + " ";
+       }
+    }
+    out += "\n";
+  }
+
+  console.log(out);
+};
+
+
 function GameManager(size, InputManager, Actuator, StorageManager) {
   this.size           = size; // Size of the grid
   this.inputManager   = new InputManager;
@@ -11,6 +263,20 @@ function GameManager(size, InputManager, Actuator, StorageManager) {
   this.inputManager.on("keepPlaying", this.keepPlaying.bind(this));
 
   this.setup();
+
+  var d = 0;
+  var b = this;
+
+/*
+  var m = function () {
+    b.move(d);
+    d++;
+    d %= 2;
+    window.setTimeout(m, 0);
+  };
+
+  window.setTimeout(m, 0);
+*/
 }
 
 // Restart the game
@@ -133,6 +399,17 @@ GameManager.prototype.move = function (direction) {
 
   if (this.isGameTerminated()) return; // Don't do anything if the game's over
 
+  if (direction == -1) {
+    this.bestMove();
+    return;
+  }
+  if (direction == -2) {
+    var s = new AIState(this.grid);
+    s.log();
+    console.log("value = " + s.eval(0));
+    return;
+  }
+
   var cell, tile;
 
   var vector     = this.getVector(direction);
@@ -188,6 +465,35 @@ GameManager.prototype.move = function (direction) {
 
     this.actuate();
   }
+
+};
+
+GameManager.prototype.bestMove = function () {
+  console.log("child states");
+  var s = new AIState(this.grid);
+
+  var children = s.childStates();
+
+  children.forEach(function (x) {
+    x.log();
+  });
+
+  var cc = children.map(function (x) {
+    return [x.eval(3), x.last];
+  });
+
+  console.log(cc);
+
+  var nextMove = cc.reduce(function (x, y) {
+    return x[0] > y[0] ? x : y;
+  }, [-10000000, -1])[1];
+
+  if (nextMove == -1)
+    return;
+
+  console.log("next move = " + nextMove);
+
+  this.move(nextMove);
 };
 
 // Get the vector representing the chosen direction
